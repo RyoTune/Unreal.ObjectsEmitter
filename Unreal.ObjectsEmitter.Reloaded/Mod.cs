@@ -1,12 +1,11 @@
-﻿using Reloaded.Hooks.ReloadedII.Interfaces;
-using Reloaded.Memory.SigScan.ReloadedII.Interfaces;
+﻿using System.Diagnostics;
+using Reloaded.Hooks.ReloadedII.Interfaces;
 using Reloaded.Mod.Interfaces;
+using UE.Toolkit.Interfaces;
 using Unreal.ObjectsEmitter.Interfaces;
 using Unreal.ObjectsEmitter.Reloaded.Configuration;
-using Unreal.ObjectsEmitter.Reloaded.DataTables;
-using Unreal.ObjectsEmitter.Reloaded.Objects;
 using Unreal.ObjectsEmitter.Reloaded.Template;
-using Unreal.ObjectsEmitter.Reloaded.Unreal;
+using IDataTables = Unreal.ObjectsEmitter.Interfaces.IDataTables;
 
 namespace Unreal.ObjectsEmitter.Reloaded;
 
@@ -20,9 +19,7 @@ public class Mod : ModBase, IExports
     private Config config;
     private readonly IModConfig modConfig;
 
-    private readonly UnrealService unreal;
-    private readonly DataTablesService dataTables;
-    private readonly UObjectsService uobjects;
+    private readonly ObjectEmitterShim objEmitShim;
 
     public Mod(ModContext context)
     {
@@ -40,25 +37,21 @@ public class Mod : ModBase, IExports
         Debugger.Launch();
 #endif
 
-        this.unreal = new();
-        this.dataTables = new(this.unreal);
-        this.uobjects = new(this.unreal);
-
-        this.modLoader.AddOrReplaceController<IUnreal>(this.owner, this.unreal);
-        this.modLoader.AddOrReplaceController<IDataTables>(this.owner, this.dataTables);
-        this.modLoader.AddOrReplaceController<IUObjects>(this.owner, this.uobjects);
+        modLoader.GetController<IUnrealMemory>().TryGetTarget(out var mem);
+        modLoader.GetController<IUnrealObjects>().TryGetTarget(out var objs);
+        modLoader.GetController<IUnrealNames>().TryGetTarget(out var names);
+        modLoader.GetController<UE.Toolkit.Interfaces.IDataTables>().TryGetTarget(out var dt);
+        
+        objEmitShim = new(mem!, objs!, names!, dt!);
+        this.modLoader.AddOrReplaceController<IUnreal>(this.owner, this.objEmitShim);
+        this.modLoader.AddOrReplaceController<IDataTables>(this.owner, this.objEmitShim);
+        this.modLoader.AddOrReplaceController<IUObjects>(this.owner, this.objEmitShim);
 
         this.ApplyConfig();
-        this.modLoader.GetController<IStartupScanner>().TryGetTarget(out var scanner);
         Project.Start();
     }
 
-    private void ApplyConfig()
-    {
-        Log.LogLevel = this.config.LogLevel;
-        this.dataTables.SetLogTables(this.config.LogTables);
-        this.uobjects.SetLogObjects(this.config.LogObjects);
-    }
+    private void ApplyConfig() => Log.LogLevel = this.config.LogLevel;
 
     #region Standard Overrides
     public override void ConfigurationUpdated(Config configuration)
@@ -70,7 +63,7 @@ public class Mod : ModBase, IExports
         this.ApplyConfig();
     }
 
-    public Type[] GetTypes() => new Type[] { typeof(IUnreal), typeof(IDataTables), typeof(IUObjects) };
+    public Type[] GetTypes() => [typeof(IUnreal), typeof(IDataTables), typeof(IUObjects)];
     #endregion
 
     #region For Exports, Serialization etc.
